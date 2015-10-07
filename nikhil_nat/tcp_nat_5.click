@@ -1,0 +1,3 @@
+define($SADDR eth0, $SPORT 6788, $BOOTADDR eth0, $BOOTPORT 4545, $DEV eth0, $GW $DEV:gw)
+
+gdp :: GDPRouterNat($SADDR, $SPORT, $BOOTADDR, $BOOTPORT)
