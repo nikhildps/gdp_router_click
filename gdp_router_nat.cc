@@ -79,7 +79,7 @@ int GDPRouterNat::initialize(ErrorHandler *errh) {
 	_localFD = socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
 	_localServer.sin_family = AF_INET;
 	_localServer.sin_port = htons(_myInfo.port);
-	_localServer.sin_addr = _myInfo.privateIP;
+	_localServer.sin_addr.s_addr = INADDR_ANY;
 	int localLen = sizeof(_localServer);
 
 	socklen_t sockOptLen = sizeof(int);
@@ -3821,7 +3821,7 @@ void GDPRouterNat::initialize_webServer() {
 	_webFD = socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
 	_webServer.sin_family = AF_INET;
 	_webServer.sin_port = htons(_webPort);
-	_webServer.sin_addr = _myInfo.privateIP;
+	_webServer.sin_addr.s_addr = INADDR_ANY;
 	int webLen = sizeof(_webServer);
 
 	socklen_t sockOptLen = sizeof(int);
