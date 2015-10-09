@@ -1257,7 +1257,6 @@ int GDPRouterNat::handleAddPrimaryAck(int recvFD, routePacket* recvPacket) {
 		advertismentEntry* sec = (advertismentEntry *)SecAdvOffset;
 		for (int i = 0; i < numSecondaryAdvertisments; i++) {
 			string key(sec[i].ID);
-			printf("ADD PRIMA ACK: %s, %s, %d\n", key.c_str(), inet_ntoa(sec[i].node.publicIP), sec[i].node.port);
 			_secondaryAdvertisments[key] = sec[i].node;
 		}
 	}
@@ -3962,6 +3961,12 @@ void GDPRouterNat::sendLogBytes(int fd) {
 			}
 		}
 		
+		json_t *clientObject;
+		clientObject = json_array();
+		for (map<string, int>::iterator it = _clientAdvertisments.begin(); it != _clientAdvertisments.end(); it++) {
+			json_array_append_new(clientObject, json_string((it->first).c_str()));
+		}
+		
 		json_t* completeObject = json_object();
 		json_object_set_new(completeObject, "My Type", json_string("Primary"));
 		json_object_set_new(completeObject, "My Public IP", json_string(inet_ntoa(_myInfo.publicIP)));
@@ -3969,6 +3974,7 @@ void GDPRouterNat::sendLogBytes(int fd) {
 		json_object_set_new(completeObject, "My GDP Port", json_integer(_myInfo.port));
 		json_object_set_new(completeObject, "Primary Nodes", primaryObject);
 		json_object_set_new(completeObject, "Secondary Nodes", secondaryObject);
+		json_object_set_new(completeObject, "Clients", clientObject);
 		char responseHeader[1024];
 		char *responseData;
    		int responseLen;
@@ -4085,6 +4091,12 @@ void GDPRouterNat::sendLogBytes(int fd) {
 		json_object_set_new(NATgrp, "Nodes", sec);
 		json_array_append_new(secondaryObject, NATgrp);
 		
+		json_t *clientObject;
+		clientObject = json_array();
+		for (map<string, int>::iterator it = _clientAdvertisments.begin(); it != _clientAdvertisments.end(); it++) {
+			json_array_append_new(clientObject, json_string((it->first).c_str()));
+		}
+		
 		json_t* completeObject = json_object();
 		json_object_set_new(completeObject, "My Type", json_string("Secondary"));
 		json_object_set_new(completeObject, "My Public IP", json_string(inet_ntoa(_myInfo.publicIP)));
@@ -4092,6 +4104,7 @@ void GDPRouterNat::sendLogBytes(int fd) {
 		json_object_set_new(completeObject, "My GDP Port", json_integer(_myInfo.port));
 		json_object_set_new(completeObject, "Primary Nodes", primaryObject);
 		json_object_set_new(completeObject, "Secondary Nodes", secondaryObject);
+		json_object_set_new(completeObject, "Clients", clientObject);
 		char responseHeader[1024];
 		char *responseData;
    		int responseLen;
