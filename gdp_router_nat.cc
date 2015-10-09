@@ -859,7 +859,6 @@ int GDPRouterNat::handleJoinAckPacket(int recvFD, routePacket* recvPacket) {
 			advertismentEntry* sec = (advertismentEntry *)SecAdvOffset;
 			for (int i = 0; i < numSecondaryAdvertisments; i++) {
 				string key(sec[i].ID);
-				printf("RECEV: %s, %s, %d\n", key.c_str(), inet_ntoa(sec[i].node.privateIP), sec[i].node.port);
 				_secondaryAdvertisments[sec[i].ID] = sec[i].node;
 			}
 		}
