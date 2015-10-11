@@ -191,6 +191,7 @@ class GDPRouterNat : public Element {
 		 void eraseStats(int fd);
 		 
 		 // web interface
+		 string stringToHex(string& input);
 		 void initialize_webServer();
 		 void sendLogBytes(int fd);
 		 
