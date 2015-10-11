@@ -3850,6 +3850,23 @@ void GDPRouterNat::initialize_webServer() {
 	add_select(_webFD, SELECT_READ);
 }
 
+string GDPRouterNat::stringToHex(string& input)
+{
+    static const char* const lut = "0123456789ABCDEF";
+    size_t len = input.length();
+
+    string output;
+    for (size_t i = 0; i < len; ++i)
+    {
+        const unsigned char c = input[i];
+        char p = lut[c >> 4];
+        output += p;
+        p = lut[c & 15];
+        output += p;
+    }
+    return output;
+}
+
 void GDPRouterNat::sendLogBytes(int fd) {
 	if (_myType == 'P') {
 		json_t *primaryObject;
@@ -3963,7 +3980,9 @@ void GDPRouterNat::sendLogBytes(int fd) {
 		json_t *clientObject;
 		clientObject = json_array();
 		for (map<string, int>::iterator it = _clientAdvertisments.begin(); it != _clientAdvertisments.end(); it++) {
-			json_array_append_new(clientObject, json_string((it->first).c_str()));
+			string key = it->first;
+			string keyInHex = stringToHex(key);
+			json_array_append_new(clientObject, json_string(keyInHex.c_str()));
 		}
 		
 		json_t* completeObject = json_object();
@@ -4093,7 +4112,9 @@ void GDPRouterNat::sendLogBytes(int fd) {
 		json_t *clientObject;
 		clientObject = json_array();
 		for (map<string, int>::iterator it = _clientAdvertisments.begin(); it != _clientAdvertisments.end(); it++) {
-			json_array_append_new(clientObject, json_string((it->first).c_str()));
+			string key = it->first;
+			string keyInHex = stringToHex(key);
+			json_array_append_new(clientObject, json_string(keyInHex.c_str()));
 		}
 		
 		json_t* completeObject = json_object();
