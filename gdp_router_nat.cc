@@ -2294,7 +2294,11 @@ int GDPRouterNat::handleClientAdvertisment(int recvFD, string& message, int data
 	int numNewClients = 0;
 	
 	// Update _clientAdvertisments for packetSrc
-	_clientAdvertisments[packetSrc] = recvFD;
+	if (packetCmd == (char)(ADVERTISE_CMD)) {
+		_clientAdvertisments[packetSrc] = recvFD;
+	} else if (packetCmd == (char)(ADVERTISE_WITHDRAW)) {
+		_clientAdvertisments.erase(packetSrc);
+	}
 	numNewClients++;
 	
 	// It is possible the message data contains more advertisements
@@ -2305,9 +2309,9 @@ int GDPRouterNat::handleClientAdvertisment(int recvFD, string& message, int data
 		string key = packetData.substr(i, 32);
 		if (packetCmd == (char)(ADVERTISE_CMD)) {
 			_clientAdvertisments[key] = recvFD;
-		} /*else if (packetCmd == (char)(ADVERTISE_WITHDRAW)) {
+		} else if (packetCmd == (char)(ADVERTISE_WITHDRAW)) {
 			_clientAdvertisments.erase(key);
-		}*/
+		}
 		numNewClients++;
 	}
 	
