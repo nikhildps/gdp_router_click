@@ -9,6 +9,6 @@
 //CANBEPROXY - boolean option wether the router can serve as proxy or not (true or false)
 //WPORT - port of the http server running inside router to display statistics in visualization tool
 
-define($SADDR 128.32.33.47, $SPORT 8988, $BOOTADDR 128.32.33.68, $BOOTPORT 7788, $CANBEPROXY false, $WPORT 14000)
+define($SADDR 128.32.33.47, $SPORT 8988, $BOOTADDR 128.32.33.68, $BOOTPORT 5655, $CANBEPROXY false, $WPORT 14000)
 
 gdp :: GDPRouterNat($SADDR, $SPORT, $BOOTADDR, $BOOTPORT, $CANBEPROXY, $WPORT)
