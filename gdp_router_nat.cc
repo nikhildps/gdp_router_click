@@ -54,6 +54,7 @@ int GDPRouterNat::configure(Vector<String> &conf, ErrorHandler *errh) {
 		.read_mp("SPORT", IPPortArg(IP_PROTO_TCP), _myInfo.port)
 		.read_mp("DST", _bootStrap.publicIP)
 		.read_mp("DPORT", IPPortArg(IP_PROTO_TCP), _bootStrap.port)
+		.read_mp("CANBEPROXY", _myInfo.canBeProxy)
 		.read_mp("WPORT", IPPortArg(IP_PROTO_TCP), _webPort)
 		.complete() < 0)
 		return -1;
@@ -61,6 +62,7 @@ int GDPRouterNat::configure(Vector<String> &conf, ErrorHandler *errh) {
 	
 	_bootStrap.privateIP = _bootStrap.publicIP;
 	_myInfo.publicIP = _myInfo.privateIP;
+	_bootStrap.canBeProxy = false; //will just assume bootstrap cant serve as proxy
 	
 	if (_myInfo == _bootStrap) {
 		// I am the first node to join the network and i am a 'P' node
@@ -696,51 +698,56 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
 		
 		sendPacket->kill();
 		
-		// creating NEW_PRIMARY for directly connected secondary nodes
-		packetDataSize = sizeof(routeTableEntry);
-		sendPacket = createGDPPacket(version, cmd, dst, src, packetDataSize);
-		char* newPrimaryOffset = (char *)(sendPacket->data()) + GDP_HEADER_SIZE;
-		routePacket* newPrimaryPacket = (routePacket *)(newPrimaryOffset);
-		newPrimaryPacket->type = NEW_PRIMARY;
-		newPrimaryPacket->src = _myInfo;
-		newPrimaryPacket->numClientAdvertisments = 0;
-		newPrimaryPacket->numSecondaryAdvertisments = 0;
-		newPrimaryPacket->numSecondary = 0;
-		newPrimaryPacket->numPrimary = 1;
-		newPrimaryPacket->isTypeAssigned = false;
-		memcpy((void *)(sendPacket->data() + totalHeaderSize), &(recvPacket->src), sizeof(routeTableEntry));
-	
-		//Sending NEW_PRIMARY to all directly connected secondary nodes
-		for (map<unsigned long, vector<routeTableEntry> >::iterator it = _publicToPrivate.begin(); it != _publicToPrivate.end(); it++) {
-			int size = (it->second).size();
-			for (int i = 0; i < size; i++) {
-				routeTableEntry s = (it->second)[i];
+		if ((recvPacket->src).canBeProxy == true) {
+			// If the new P node can serve as proxy, only then we would inform
+			// directly connected S nodes about the new P node
 			
-				routePacket* r = (routePacket *)(sendPacket->data());
-				r->dst = s;
+			// creating NEW_PRIMARY for directly connected secondary nodes
+			packetDataSize = sizeof(routeTableEntry);
+			sendPacket = createGDPPacket(version, cmd, dst, src, packetDataSize);
+			char* newPrimaryOffset = (char *)(sendPacket->data()) + GDP_HEADER_SIZE;
+			routePacket* newPrimaryPacket = (routePacket *)(newPrimaryOffset);
+			newPrimaryPacket->type = NEW_PRIMARY;
+			newPrimaryPacket->src = _myInfo;
+			newPrimaryPacket->numClientAdvertisments = 0;
+			newPrimaryPacket->numSecondaryAdvertisments = 0;
+			newPrimaryPacket->numSecondary = 0;
+			newPrimaryPacket->numPrimary = 1;
+			newPrimaryPacket->isTypeAssigned = false;
+			memcpy((void *)(sendPacket->data() + totalHeaderSize), &(recvPacket->src), sizeof(routeTableEntry));
+	
+			//Sending NEW_PRIMARY to all directly connected secondary nodes
+			for (map<unsigned long, vector<routeTableEntry> >::iterator it = _publicToPrivate.begin(); it != _publicToPrivate.end(); it++) {
+				int size = (it->second).size();
+				for (int i = 0; i < size; i++) {
+					routeTableEntry s = (it->second)[i];
+			
+					routePacket* r = (routePacket *)(sendPacket->data());
+					r->dst = s;
 				
-				map<routeTableEntry, int>::iterator findFD = _routeTable.find(s);
-				if (findFD != _routeTable.end()) {
-					int sendFD = findFD->second;
-					int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
-					if (PRINT) {
+					map<routeTableEntry, int>::iterator findFD = _routeTable.find(s);
+					if (findFD != _routeTable.end()) {
+						int sendFD = findFD->second;
+						int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
+						if (PRINT) {
+							string pubIP(inet_ntoa(s.publicIP));
+							string priIP(inet_ntoa(s.privateIP));
+							click_chatter("Sending NEW_PRIMARY to node (%s, %s, %d)\n", pubIP.c_str(), priIP.c_str(), s.port);
+						}
+				
+						if (sentPacket < 0) {
+							perror("Error writing New Primary packet to remote socket: \n");
+						}
+					} else {
 						string pubIP(inet_ntoa(s.publicIP));
 						string priIP(inet_ntoa(s.privateIP));
-						click_chatter("Sending NEW_PRIMARY to node (%s, %s, %d)\n", pubIP.c_str(), priIP.c_str(), s.port);
+						click_chatter("I dont have the file descriptor for the secondary node (%s, %s, %d) \n", 
+										pubIP.c_str(), priIP.c_str(), s.port);
 					}
-				
-					if (sentPacket < 0) {
-						perror("Error writing New Primary packet to remote socket: \n");
-					}
-				} else {
-					string pubIP(inet_ntoa(s.publicIP));
-					string priIP(inet_ntoa(s.privateIP));
-					click_chatter("I dont have the file descriptor for the secondary node (%s, %s, %d) \n", 
-									pubIP.c_str(), priIP.c_str(), s.port);
 				}
 			}
+			sendPacket->kill();
 		}
-		sendPacket->kill();
 		
 		if (PRINT) {
 			click_chatter("Sent JOIN_ACK to Primary Node\n");
@@ -752,7 +759,17 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
 		char cmd = (char)(ROUTE_PROTOCOL);
 		string dst = _GDPRouterAddress;
 		string src = _GDPRouterAddress;
-		int packetDataSize = _primaryNodes.size() * sizeof(routeTableEntry);
+		
+		//int packetDataSize = _primaryNodes.size() * sizeof(routeTableEntry);
+		int numProxies = 0;
+		int numP = _primaryNodes.size();
+		for (int i = 0; i < numP; i++) {
+			if (_primaryNodes[i].canBeProxy == true) {
+				numProxies++;
+			}
+		}
+		int packetDataSize = numProxies * sizeof(routeTableEntry);
+		
 		WritablePacket *sendPacket = createGDPPacket(version, cmd, dst, src, packetDataSize);
 		
 		char *joinAckOffset = (char *)(sendPacket->data()) + GDP_HEADER_SIZE;
@@ -763,7 +780,7 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
   		joinAckPacket->numClientAdvertisments = 0;
   		joinAckPacket->numSecondaryAdvertisments = 0;
   		joinAckPacket->numSecondary = 0;
-  		joinAckPacket->numPrimary = _primaryNodes.size();
+  		joinAckPacket->numPrimary = numProxies;
   		joinAckPacket->isTypeAssigned = true;
   		joinAckPacket->typeAssigned = 'S';
   		
@@ -774,8 +791,10 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
 			char* priOffset = (char *)(sendPacket->data() +
 										totalHeaderSize);
 			routeTableEntry* pri = (routeTableEntry *)priOffset;
-			for (int i = 0; i < joinAckPacket->numPrimary; i++) {
-				pri[i] = _primaryNodes[i];
+			for (int i = 0; i < numP; i++) {
+				if (_primaryNodes[i].canBeProxy == true) {
+					pri[i] = _primaryNodes[i];
+				}
 				
 				if (PRINT) {
 					click_chatter("placing node inside ack message(%s, %d)\n", inet_ntoa(pri[i].publicIP), pri[i].port);
@@ -834,6 +853,16 @@ int GDPRouterNat::handleJoinAckPacket(int recvFD, routePacket* recvPacket) {
 	}
 	
 	if (_myType == 'P') {
+		// determine if the bootstrap can serve as proxy and update
+		// this is important as we initially assume bootstrap is not proxy
+		if ((recvPacket->src).canBeProxy == true) {
+			_bootStrap.canBeProxy = true;
+			
+			// at present, there is only one entry in the _primaryNodes
+			// the bootstrap
+			_primaryNodes[0].canBeProxy = true;
+		}
+		
 		int numClientAdvertisments = recvPacket->numClientAdvertisments;
 		int numSecondaryAdvertisments = recvPacket->numSecondaryAdvertisments;
 		int numSecondary = recvPacket->numSecondary;
@@ -983,6 +1012,13 @@ int GDPRouterNat::handleJoinAckPacket(int recvFD, routePacket* recvPacket) {
 			eraseStats(recvFD);
 		}
 		close(recvFD);
+		
+		if ((recvPacket->src).canBeProxy == false) {
+			// removing the bootstrap from the _primaryNodes list
+			// as it may not be able to serve as a proxy
+			// currently the _primaryNodes holds only one entry (bootstrap)
+			_primaryNodes.clear();
+		}
 		
 		int numPrimary = recvPacket->numPrimary;
 		const char *priOffset = (char *)(recvPacket) + sizeof(routePacket);
@@ -1161,56 +1197,61 @@ int GDPRouterNat::handleAddPrimary(int recvFD, routePacket* recvPacket) {
 	}
 	sendPacket->kill();
 	
-	// creating NEW_PRIMARY for directly connected secondary nodes
-	version = (char)(VERSION);
-	cmd = (char)(ROUTE_PROTOCOL);
-	dst = _GDPRouterAddress;
-	src = _GDPRouterAddress;
-	packetDataSize = sizeof(routeTableEntry);
-	sendPacket = createGDPPacket(version, cmd, dst, src, packetDataSize);
+	if ((recvPacket->src).canBeProxy == true) {
+		// Inform all directly connected S nodes about the new P node
+		// if the new P node can serve as a proxy
+		
+		// creating NEW_PRIMARY for directly connected secondary nodes
+		version = (char)(VERSION);
+		cmd = (char)(ROUTE_PROTOCOL);
+		dst = _GDPRouterAddress;
+		src = _GDPRouterAddress;
+		packetDataSize = sizeof(routeTableEntry);
+		sendPacket = createGDPPacket(version, cmd, dst, src, packetDataSize);
 	
-	char *newPrimaryOffset = (char *)(sendPacket->data()) + GDP_HEADER_SIZE;
-	routePacket* newPrimaryPacket = (routePacket *)(newPrimaryOffset);
-	newPrimaryPacket->type = NEW_PRIMARY;
-	newPrimaryPacket->src = _myInfo;
-	newPrimaryPacket->numClientAdvertisments = 0;
-	newPrimaryPacket->numSecondaryAdvertisments = 0;
-	newPrimaryPacket->numSecondary = 0;
-	newPrimaryPacket->numPrimary = 1;
-	newPrimaryPacket->isTypeAssigned = false;
+		char *newPrimaryOffset = (char *)(sendPacket->data()) + GDP_HEADER_SIZE;
+		routePacket* newPrimaryPacket = (routePacket *)(newPrimaryOffset);
+		newPrimaryPacket->type = NEW_PRIMARY;
+		newPrimaryPacket->src = _myInfo;
+		newPrimaryPacket->numClientAdvertisments = 0;
+		newPrimaryPacket->numSecondaryAdvertisments = 0;
+		newPrimaryPacket->numSecondary = 0;
+		newPrimaryPacket->numPrimary = 1;
+		newPrimaryPacket->isTypeAssigned = false;
 	
-	memcpy((void *)(sendPacket->data() + totalHeaderSize), &(recvPacket->src), sizeof(routeTableEntry));
+		memcpy((void *)(sendPacket->data() + totalHeaderSize), &(recvPacket->src), sizeof(routeTableEntry));
 	
-	//Sending NEW_PRIMARY to all directly connected secondary nodes
-	for (map<unsigned long, vector<routeTableEntry> >::iterator it = _publicToPrivate.begin(); it != _publicToPrivate.end(); it++) {
-		int size = (it->second).size();
-		for (int i = 0; i < size; i++) {
-			routeTableEntry s = (it->second)[i];
+		//Sending NEW_PRIMARY to all directly connected secondary nodes
+		for (map<unsigned long, vector<routeTableEntry> >::iterator it = _publicToPrivate.begin(); it != _publicToPrivate.end(); it++) {
+			int size = (it->second).size();
+			for (int i = 0; i < size; i++) {
+				routeTableEntry s = (it->second)[i];
 			
-			routePacket* r = (routePacket *)(sendPacket->data());
-			r->dst = s;
+				routePacket* r = (routePacket *)(sendPacket->data());
+				r->dst = s;
 			
-			map<routeTableEntry, int>::iterator findFD = _routeTable.find(s);
-			if (findFD != _routeTable.end()) {
-				int sendFD = findFD->second;
-				int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
-				if (PRINT) {
+				map<routeTableEntry, int>::iterator findFD = _routeTable.find(s);
+				if (findFD != _routeTable.end()) {
+					int sendFD = findFD->second;
+					int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
+					if (PRINT) {
+						string pubIP(inet_ntoa(s.publicIP));
+						string priIP(inet_ntoa(s.privateIP));
+						click_chatter("Sending NEW_PRIMARY to node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port, _routeTable[s]);
+					}
+				
+					if (sentPacket < 0) {
+						perror("Error writing New Primary packet to remote socket: \n");
+					}
+				} else {
 					string pubIP(inet_ntoa(s.publicIP));
 					string priIP(inet_ntoa(s.privateIP));
-					click_chatter("Sending NEW_PRIMARY to node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port, _routeTable[s]);
+					click_chatter("I dont have the file descriptor for secondary node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port);
 				}
-				
-				if (sentPacket < 0) {
-					perror("Error writing New Primary packet to remote socket: \n");
-				}
-			} else {
-				string pubIP(inet_ntoa(s.publicIP));
-				string priIP(inet_ntoa(s.privateIP));
-				click_chatter("I dont have the file descriptor for secondary node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port);
 			}
 		}
+		sendPacket->kill();
 	}
-	sendPacket->kill();
 		
 	routeTableEntry newPrimary = recvPacket->src;
 	
@@ -1562,7 +1603,16 @@ int GDPRouterNat::handleJoinSecondary(int recvFD, routePacket* recvPacket) {
 		cmd = (char)(ROUTE_PROTOCOL);
 		dst = _GDPRouterAddress;
 		src = _GDPRouterAddress;
-		packetDataSize = _primaryNodes.size() * sizeof(routeTableEntry);
+		
+		int numP = _primaryNodes.size();
+		int numProxies = 0;
+		for (int i = 0; i < numP; i++) {
+			if (_primaryNodes[i].canBeProxy == true) {
+				numProxies++;
+			}
+		}
+		
+		packetDataSize = numProxies * sizeof(routeTableEntry);
 		sendPacket = createGDPPacket(version, cmd, dst, src, packetDataSize);
 		
 		char *joinSecondaryAckOffset = (char *)(sendPacket->data()) + GDP_HEADER_SIZE;
@@ -1573,15 +1623,17 @@ int GDPRouterNat::handleJoinSecondary(int recvFD, routePacket* recvPacket) {
 		joinSecondaryAckPacket->numClientAdvertisments = 0;
 		joinSecondaryAckPacket->numSecondaryAdvertisments = 0;
 		joinSecondaryAckPacket->numSecondary = 0;
-	    joinSecondaryAckPacket->numPrimary = _primaryNodes.size();
+	    joinSecondaryAckPacket->numPrimary = numProxies;
 	    joinSecondaryAckPacket->isTypeAssigned = false;
 		
 		//Add all the primary nodes
 		if (joinSecondaryAckPacket->numPrimary > 0) {
 			char *priOffset = (char *)(sendPacket->data() + totalHeaderSize);
 			routeTableEntry* pri = (routeTableEntry *)priOffset;
-			for (int i = 0; i < joinSecondaryAckPacket->numPrimary; i++) {
-				pri[i] = _primaryNodes[i];
+			for (int i = 0; i < numP; i++) {
+				if (_primaryNodes[i].canBeProxy == true) {
+					pri[i] = _primaryNodes[i];
+				}
 			}
 		}
 		
@@ -1951,8 +2003,7 @@ int GDPRouterNat::handleJoinSecondaryNak(int recvFD, routePacket* recvPacket) {
 			   (void *)concatAdvertisments.c_str(), concatAdvertisments.length());
 	}
 	
-	// chose a new proxy 
-	// FOR NOW PICK THE LAST ENTRY IN _primaryNodes
+	// chose a new proxy
 	findProxyAndConnect(sendPacket);
 	sendPacket->kill();
 	return 0;
@@ -3463,58 +3514,63 @@ int GDPRouterNat::handlePrimaryFailure(int priFD) {
 				_primaryAdvertisments.erase(advertismentsToRemove[i]);
 			}
 			
-			// Send a WITHDRAW_PRIMARY command to all the S nodes directly connected to me
-			// creating WITHDRAW_PRIMARY for directly connected secondary nodes
-			char version = (char)(VERSION);
-			char cmd = (char)(ROUTE_PROTOCOL);
-			string dst = _GDPRouterAddress;
-			string src = _GDPRouterAddress;
-			int packetDataSize = sizeof(routeTableEntry);
-			WritablePacket* sendPacket = createGDPPacket(version, cmd, dst, src, packetDataSize);
+			if (failedNode.canBeProxy == true) {
+				// if the failed node could have served as a proxy
+				// all directly S nodes need to be informed that the node doesnt exist anymore
+				
+				// Send a WITHDRAW_PRIMARY command to all the S nodes directly connected to me
+				// creating WITHDRAW_PRIMARY for directly connected secondary nodes
+				char version = (char)(VERSION);
+				char cmd = (char)(ROUTE_PROTOCOL);
+				string dst = _GDPRouterAddress;
+				string src = _GDPRouterAddress;
+				int packetDataSize = sizeof(routeTableEntry);
+				WritablePacket* sendPacket = createGDPPacket(version, cmd, dst, src, packetDataSize);
 			
-			char* withdrawPrimaryOffset = (char *)(sendPacket->data()) + GDP_HEADER_SIZE;
-			routePacket* withdrawPrimaryPacket = (routePacket *)(withdrawPrimaryOffset);
-			withdrawPrimaryPacket->type = WITHDRAW_PRIMARY;
-			withdrawPrimaryPacket->src = _myInfo;
-			withdrawPrimaryPacket->numClientAdvertisments = 0;
-			withdrawPrimaryPacket->numSecondaryAdvertisments = 0;
-			withdrawPrimaryPacket->numSecondary = 0;
-			withdrawPrimaryPacket->numPrimary = 1;
-			withdrawPrimaryPacket->isTypeAssigned = false;
+				char* withdrawPrimaryOffset = (char *)(sendPacket->data()) + GDP_HEADER_SIZE;
+				routePacket* withdrawPrimaryPacket = (routePacket *)(withdrawPrimaryOffset);
+				withdrawPrimaryPacket->type = WITHDRAW_PRIMARY;
+				withdrawPrimaryPacket->src = _myInfo;
+				withdrawPrimaryPacket->numClientAdvertisments = 0;
+				withdrawPrimaryPacket->numSecondaryAdvertisments = 0;
+				withdrawPrimaryPacket->numSecondary = 0;
+				withdrawPrimaryPacket->numPrimary = 1;
+				withdrawPrimaryPacket->isTypeAssigned = false;
 		
-			int totalHeaderSize = GDP_HEADER_SIZE + sizeof(routePacket);
-			memcpy((void *)(sendPacket->data() + totalHeaderSize), &(failedNode), sizeof(routeTableEntry));
+				int totalHeaderSize = GDP_HEADER_SIZE + sizeof(routePacket);
+				memcpy((void *)(sendPacket->data() + totalHeaderSize), &(failedNode), sizeof(routeTableEntry));
 	
-			//Sending WITHDRAW_PRIMARY to all directly connected secondary nodes
-			for (map<unsigned long, vector<routeTableEntry> >::iterator it = _publicToPrivate.begin(); it != _publicToPrivate.end(); it++) {
-				int size = (it->second).size();
-				for (int i = 0; i < size; i++) {
-					routeTableEntry s = (it->second)[i];
+				//Sending WITHDRAW_PRIMARY to all directly connected secondary nodes
+				for (map<unsigned long, vector<routeTableEntry> >::iterator it = _publicToPrivate.begin(); it != _publicToPrivate.end(); it++) {
+					int size = (it->second).size();
+					for (int i = 0; i < size; i++) {
+						routeTableEntry s = (it->second)[i];
 			
-					routePacket* r = (routePacket *)(sendPacket->data());
-					r->dst = s;
+						routePacket* r = (routePacket *)(sendPacket->data());
+						r->dst = s;
 			
-					map<routeTableEntry, int>::iterator findFD = _routeTable.find(s);
-					if (findFD != _routeTable.end()) {
-						int sendFD = findFD->second;
-						int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
-						if (PRINT) {
+						map<routeTableEntry, int>::iterator findFD = _routeTable.find(s);
+						if (findFD != _routeTable.end()) {
+							int sendFD = findFD->second;
+							int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
+							if (PRINT) {
+								string pubIP(inet_ntoa(s.publicIP));
+								string priIP(inet_ntoa(s.privateIP));
+								click_chatter("Sending WITHDRAW_PRIMARY to node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port, _routeTable[s]);
+							}
+				
+							if (sentPacket < 0) {
+								perror("Error writing Withdraw Primary packet to remote socket: \n");
+							}
+						} else {
 							string pubIP(inet_ntoa(s.publicIP));
 							string priIP(inet_ntoa(s.privateIP));
-							click_chatter("Sending WITHDRAW_PRIMARY to node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port, _routeTable[s]);
+							click_chatter("I dont have the file descriptor for secondary node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port);
 						}
-				
-						if (sentPacket < 0) {
-							perror("Error writing Withdraw Primary packet to remote socket: \n");
-						}
-					} else {
-						string pubIP(inet_ntoa(s.publicIP));
-						string priIP(inet_ntoa(s.privateIP));
-						click_chatter("I dont have the file descriptor for secondary node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port);
 					}
 				}
+				sendPacket->kill();
 			}
-			sendPacket->kill();
 		} else {
 			click_chatter("Error, Couldnt find the failed P node given the fd\n");
 		}

@@ -60,6 +60,7 @@ struct routeTableEntry {
 	struct in_addr publicIP;
 	struct in_addr privateIP;
 	uint16_t port;
+	bool canBeProxy; // parameter to indicate if the router can serve as proxy to S nodes
 	
 	routeTableEntry() {
 		publicIP.s_addr = 0;
