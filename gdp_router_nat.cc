@@ -43,6 +43,9 @@ GDPRouterNat::GDPRouterNat(): _pingTimer(this), _joinTimer(this), _logTimer(this
 	//web interface
 	_webFD = -1;
 	_webPort = 0;
+	
+	//debug output
+	_debug = 0;
 }
 
 GDPRouterNat::~GDPRouterNat()
@@ -56,6 +59,7 @@ int GDPRouterNat::configure(Vector<String> &conf, ErrorHandler *errh) {
 		.read_mp("DPORT", IPPortArg(IP_PROTO_TCP), _bootStrap.port)
 		.read_mp("CANBEPROXY", _myInfo.canBeProxy)
 		.read_mp("WPORT", IPPortArg(IP_PROTO_TCP), _webPort)
+		.read_mp("DEBUG", _debug)
 		.complete() < 0)
 		return -1;
 	
@@ -67,7 +71,7 @@ int GDPRouterNat::configure(Vector<String> &conf, ErrorHandler *errh) {
 	if (_myInfo == _bootStrap) {
 		// I am the first node to join the network and i am a 'P' node
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			click_chatter("I am first node in the network\n");
 		}
 		_myType = 'P';
@@ -357,7 +361,7 @@ bool GDPRouterNat::run_task(Task *) {
  		_joinTimer.initialize(this);   // Initialize timer object (mandatory).
      	_joinTimer.schedule_after_sec(JOIN_TIMEOUT);
  		
- 		if (PRINT) {
+ 		if (_debug == 1) {
 			click_chatter("Sent Join Message to Node: (%s, %d)\n", inet_ntoa(_bootStrap.publicIP), _bootStrap.port);
 		}
      } else {
@@ -445,7 +449,7 @@ void GDPRouterNat::selected(int fd, int mask) {
 					return;
 				}
 				if (len <= 0) {
-					if (PRINT) {
+					if (_debug == 1) {
 						click_chatter("Number of bytes read from a new connection %d\n", len);
 					}
 					return;
@@ -466,7 +470,7 @@ void GDPRouterNat::selected(int fd, int mask) {
 		} else {
 			int len = read(fd, _readBuffer, READ_BUF_SIZE);
 			if (len <= 0) {
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Number of bytes read from an existing connection %d\n", len);
 				}
 				handleConnectionFailure(fd);
@@ -486,7 +490,7 @@ void GDPRouterNat::selected(int fd, int mask) {
 		}
 	
 		//create GDP PDU from buffer and newly read data (TCP reassembly)
-		if (PRINT) {
+		if (_debug == 1) {
 			click_chatter("Number of bytes read and existing in the connection buffer: %d, %d\n", readDataLen, bufferDataLen);
 		}
 		
@@ -497,7 +501,7 @@ void GDPRouterNat::selected(int fd, int mask) {
 			int version = (unsigned int)(_get_byte(0, seekPtr, bufferData, readData));
 		
 			if (version != 0x02 && version != 0x03) {//bogus version
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("bogus version");
 				}
 				handleConnectionFailure(processFD);
@@ -506,7 +510,7 @@ void GDPRouterNat::selected(int fd, int mask) {
 			} 
 		
 			if ((seekPtr + 80) > (bufferDataLen + readDataLen)) {
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Incomplete PDU, need atleast 80 bytes\n");
 				}
 				break;
@@ -524,12 +528,12 @@ void GDPRouterNat::selected(int fd, int mask) {
 			}
 		
 			unsigned int pduLen = 80 + dataLen + optLen + sigLen;
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Recvied packet of length: %d\n", pduLen);
 			}
 		
 			if ((seekPtr + pduLen) > (readDataLen + bufferDataLen)) {
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Incomplete message\n");
 				}
 				break;
@@ -552,7 +556,7 @@ void GDPRouterNat::selected(int fd, int mask) {
 			
 			status = processPacket(processFD, message, dataLen, optLen, sigLen, clientAddr.sin_addr);
 			if (status < 0) {
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Something went wrong in packet processing for connection: %d\n", processFD);
 				}
 			}
@@ -582,7 +586,7 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
 	}
 	(recvPacket->src).publicIP = srcPublicIP;
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received a Join Message from an %c node: (%s, %d)\n", srcType, inet_ntoa((recvPacket->src).privateIP), (recvPacket->src).port);	
 	}
 	
@@ -729,7 +733,7 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
 					if (findFD != _routeTable.end()) {
 						int sendFD = findFD->second;
 						int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
-						if (PRINT) {
+						if (_debug == 1) {
 							string pubIP(inet_ntoa(s.publicIP));
 							string priIP(inet_ntoa(s.privateIP));
 							click_chatter("Sending NEW_PRIMARY to node (%s, %s, %d)\n", pubIP.c_str(), priIP.c_str(), s.port);
@@ -749,7 +753,7 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
 			sendPacket->kill();
 		}
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			click_chatter("Sent JOIN_ACK to Primary Node\n");
 		}
 
@@ -796,7 +800,7 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
 					pri[i] = _primaryNodes[i];
 				}
 				
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("placing node inside ack message(%s, %d)\n", inet_ntoa(pri[i].publicIP), pri[i].port);
 				}
 			}
@@ -821,7 +825,7 @@ int GDPRouterNat::handleJoinPacket(int recvFD, routePacket* recvPacket, struct i
 		}
 		
 		// close the connection and forget about the node
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP(inet_ntoa((joinAckPacket->dst).publicIP));
 			string priIP(inet_ntoa((joinAckPacket->dst).privateIP));
 			click_chatter("sent JOIN_ACK to Secondary Node (%s, %s, %d)\n", pubIP.c_str(), priIP.c_str(), (joinAckPacket->dst).port);
@@ -844,7 +848,7 @@ int GDPRouterNat::handleJoinAckPacket(int recvFD, routePacket* recvPacket) {
 		_myInfo = recvPacket->dst;
 	}
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received a JOIN_ACK message\n");
 		click_chatter("I AM NOW a %c NODE\n", _myType);	
 		string pubIP(inet_ntoa(_myInfo.publicIP));
@@ -991,7 +995,7 @@ int GDPRouterNat::handleJoinAckPacket(int recvFD, routePacket* recvPacket) {
 					_routeTable[pri[i]] = clientFD;
 					_type[clientFD] = 'P';
 					
-					if (PRINT) {
+					if (_debug == 1) {
 						click_chatter("Sent ADD_PRIMARY to node (%s, %d) \n", inet_ntoa(pri[i].publicIP), pri[i].port);
 					}
 				}
@@ -1026,7 +1030,7 @@ int GDPRouterNat::handleJoinAckPacket(int recvFD, routePacket* recvPacket) {
 		for (int i = 0; i < numPrimary; i++) {
 			_primaryNodes.push_back(pri[i]);
 			
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("placing node in primary list (%s, %d)\n", inet_ntoa(pri[i].publicIP), pri[i].port);
 			}
 		}
@@ -1063,7 +1067,7 @@ int GDPRouterNat::handleJoinAckPacket(int recvFD, routePacket* recvPacket) {
 		// chose a proxy 
 		findProxyAndConnect(sendPacket);
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			click_chatter("Chosen Proxy is (%s, %d)\n", inet_ntoa(_primaryNodes[_proxyIndex].publicIP), _primaryNodes[_proxyIndex].port);
 		}
 		sendPacket->kill();
@@ -1072,7 +1076,7 @@ int GDPRouterNat::handleJoinAckPacket(int recvFD, routePacket* recvPacket) {
 }
 
 int GDPRouterNat::handleAddPrimary(int recvFD, routePacket* recvPacket) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received an ADD_PRIMARY message from: (%s, %d)\n", inet_ntoa((recvPacket->src).publicIP), (recvPacket->src).port);	
 	}
 	int numClientAdvertisments = recvPacket->numClientAdvertisments;
@@ -1192,7 +1196,7 @@ int GDPRouterNat::handleAddPrimary(int recvFD, routePacket* recvPacket) {
 		return -1;
 	}
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Sent ADD_PRIMARY_ACK back to node\n");	
 	}
 	sendPacket->kill();
@@ -1234,7 +1238,7 @@ int GDPRouterNat::handleAddPrimary(int recvFD, routePacket* recvPacket) {
 				if (findFD != _routeTable.end()) {
 					int sendFD = findFD->second;
 					int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
-					if (PRINT) {
+					if (_debug == 1) {
 						string pubIP(inet_ntoa(s.publicIP));
 						string priIP(inet_ntoa(s.privateIP));
 						click_chatter("Sending NEW_PRIMARY to node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port, _routeTable[s]);
@@ -1269,7 +1273,7 @@ int GDPRouterNat::handleAddPrimary(int recvFD, routePacket* recvPacket) {
 }
 
 int GDPRouterNat::handleAddPrimaryAck(int recvFD, routePacket* recvPacket) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received ADD_PRIMARY_ACK from node (%s, %d) \n", inet_ntoa((recvPacket->src).publicIP), (recvPacket->src).port);	
 	}
 	int numClientAdvertisments = recvPacket->numClientAdvertisments;
@@ -1407,7 +1411,7 @@ int GDPRouterNat::handleAddPrimaryAck(int recvFD, routePacket* recvPacket) {
 					_routeTable[pri[i]] = clientFD;
 					_type[clientFD] = 'P';
 					
-					if (PRINT) {
+					if (_debug == 1) {
 						click_chatter("Sent ADD_PRIMARY to node (%s, %d) \n", inet_ntoa(pri[i].publicIP), pri[i].port);
 					}
 				}
@@ -1420,13 +1424,13 @@ int GDPRouterNat::handleAddPrimaryAck(int recvFD, routePacket* recvPacket) {
 }
 
 int GDPRouterNat::handleNewPrimary(routePacket* recvPacket) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received a NEW_PRIMARY from (%s, %d) \n", inet_ntoa((recvPacket->src).publicIP), (recvPacket->src).port);
 	}
 	char* rOffset = (char *)(recvPacket) + sizeof(routePacket);
 	routeTableEntry* r = (routeTableEntry *)(rOffset);
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Added NEW PRIMARY node (%s, %d) \n", inet_ntoa(r->publicIP), r->port);	
 	}
 	_primaryNodes.push_back(*r);
@@ -1434,14 +1438,14 @@ int GDPRouterNat::handleNewPrimary(routePacket* recvPacket) {
 }
 
 int GDPRouterNat::handleWithdrawPrimary(routePacket* recvPacket) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received a WITHDRAW_PRIMARY from (%s, %d) \n", inet_ntoa((recvPacket->src).publicIP), (recvPacket->src).port);
 	}
 	
 	char* rOffset = (char *)(recvPacket) + sizeof(routePacket);
 	routeTableEntry* r = (routeTableEntry *)(rOffset);
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("REMOVING PRIMARY node (%s, %d) \n", inet_ntoa(r->publicIP), r->port);	
 	}
 	
@@ -1463,7 +1467,7 @@ int GDPRouterNat::handleWithdrawPrimary(routePacket* recvPacket) {
 }
 
 int GDPRouterNat::handleJoinSecondary(int recvFD, routePacket* recvPacket) {
-	if (PRINT) {
+	if (_debug == 1) {
 		string pubIP(inet_ntoa((recvPacket->src).publicIP));
 		string priIP(inet_ntoa((recvPacket->src).privateIP));
 		click_chatter("Received a JOIN_SECONDARY from node (%s, %s, %d) , %d \n", 
@@ -1540,7 +1544,7 @@ int GDPRouterNat::handleJoinSecondary(int recvFD, routePacket* recvPacket) {
 				int sendFD = findFD->second;
 				int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
 			
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Sending NEW_SECONDARY to primary node (%s, %d) \n", inet_ntoa(_primaryNodes[i].publicIP),
 									_primaryNodes[i].port);
 				}
@@ -1571,7 +1575,7 @@ int GDPRouterNat::handleJoinSecondary(int recvFD, routePacket* recvPacket) {
 					int sendFD = findFD->second;
 					int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
 				
-					if (PRINT) {
+					if (_debug == 1) {
 						string pubIP(inet_ntoa((routePacketOffset->dst).publicIP));
 						string priIP(inet_ntoa((routePacketOffset->dst).privateIP));
 						click_chatter("Sending NEW_SECONDARY to secondary node (%s, %s, %d) \n",
@@ -1640,7 +1644,7 @@ int GDPRouterNat::handleJoinSecondary(int recvFD, routePacket* recvPacket) {
 		_isFDReady[recvFD] = true;
 		int sentPacket = regulatedWrite(recvFD, sendPacket->data() , sendPacket->length());
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP(inet_ntoa(newSecondary.publicIP));
 			string priIP(inet_ntoa(newSecondary.privateIP));
 			click_chatter("Sending JOIN_SECONDARY_ACK to node (%s, %s, %d) \n", pubIP.c_str(),
@@ -1666,7 +1670,7 @@ int GDPRouterNat::handleJoinSecondary(int recvFD, routePacket* recvPacket) {
 		joinSecondaryNakPacket->src = _myInfo;
 		joinSecondaryNakPacket->dst = recvPacket->src;
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP(inet_ntoa((recvPacket->src).publicIP));
 			string priIP(inet_ntoa((recvPacket->src).privateIP));
 			click_chatter("Sending JOIN_SECONDARY_Nak to node (%s, %s, %d) \n", pubIP.c_str(),
@@ -1690,7 +1694,7 @@ int GDPRouterNat::handleJoinSecondary(int recvFD, routePacket* recvPacket) {
 
 int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 	routeTableEntry packetSrc = recvPacket->src;
-	if (PRINT) {
+	if (_debug == 1) {
 		string pubIP(inet_ntoa((recvPacket->src).publicIP));
 		string priIP(inet_ntoa((recvPacket->src).privateIP));
 		click_chatter("Received a UPDATE_SECONDARY from node (%s, %s, %d) , %d \n", 
@@ -1701,7 +1705,7 @@ int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 		// packet is coming from a secondary node
 		// choosing me as its new proxy;
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			click_chatter("The src node wants me to be its new proxy\n");
 		}
 		
@@ -1730,7 +1734,7 @@ int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 				
 				// If the ID doesnt already exist in the _secondaryAdvertisments list
 				if (findID == _secondaryAdvertisments.end()) {
-					if (PRINT) {
+					if (_debug == 1) {
 						click_chatter("I didn't have this client connected to the S node: %s\n", key.c_str());
 					}
 					_secondaryAdvertisments[key] = packetSrc;
@@ -1782,7 +1786,7 @@ int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 				int sendFD = findFD->second;
 				int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
 		
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Sending UPDATE_SECONDARY to primary node (%s, %d) \n", inet_ntoa(_primaryNodes[i].publicIP),
 									_primaryNodes[i].port);
 				}
@@ -1829,7 +1833,7 @@ int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 		_isFDReady[recvFD] = true;
 		int sentPacket = regulatedWrite(recvFD, sendPacket->data() , sendPacket->length());
 	
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP(inet_ntoa(packetSrc.publicIP));
 			string priIP(inet_ntoa(packetSrc.privateIP));
 			click_chatter("Sending UPDATE_SECONDARY_ACK to node (%s, %s, %d) \n", pubIP.c_str(),
@@ -1842,7 +1846,7 @@ int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 		sendPacket->kill();
 	} else if (packetSrc.publicIP.s_addr == packetSrc.privateIP.s_addr && findFD != _type.end() && findFD->second == 'P' && _myType == 'P') {
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			click_chatter("The src node is a P node informing me an S node has made the src node its proxy\n");
 		}
 		// packet coming from a P node 
@@ -1854,7 +1858,7 @@ int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 		//Update routeTable
 		_routeTable[*updateSecondary] = recvFD;
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP(inet_ntoa(updateSecondary->publicIP));
 			string priIP(inet_ntoa(updateSecondary->privateIP));
 			click_chatter("I am a P node and the UPDATE SECONDARY node is (%s, %s, %d)\n",
@@ -1868,7 +1872,7 @@ int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 			// for each advertisement sent by bootstrap create an entry in _primaryAdvertisments
 			for (int i = 0; i < numSecondaryAdvertisments; i++) {
 				string key(seekPtr, 32);
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("I didn't have this client connected to the S node: %s\n", key.c_str());
 				}
 				_secondaryAdvertisments[key] = *updateSecondary;
@@ -1889,7 +1893,7 @@ int GDPRouterNat::handleUpdateSecondary(int recvFD, routePacket* recvPacket) {
 		updateSecondaryNakPacket->src = _myInfo;
 		updateSecondaryNakPacket->dst = recvPacket->src;
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP(inet_ntoa((recvPacket->src).publicIP));
 			string priIP(inet_ntoa((recvPacket->src).privateIP));
 			click_chatter("Sending UPDATE_SECONDARY_NAK to node (%s, %s, %d) \n", pubIP.c_str(),
@@ -1918,7 +1922,7 @@ int GDPRouterNat::handleJoinSecondaryAck(int recvFD, routePacket* recvPacket) {
 	//Update Proxy FD;
 	_proxyFD = recvFD;
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		if (recvPacket->type == JOIN_SECONDARY_ACK) {
 			click_chatter("Received JOIN_SECONDARY_ACK from node (%s, %d) \n", inet_ntoa(_proxy.publicIP), _proxy.port);
 		} else if (recvPacket->type == UPDATE_SECONDARY_ACK) {
@@ -1935,7 +1939,7 @@ int GDPRouterNat::handleJoinSecondaryAck(int recvFD, routePacket* recvPacket) {
 		char* priOffset = (char *)(recvPacket) + sizeof(routePacket);
 		routeTableEntry* pri = (routeTableEntry *)priOffset;
 		for (int i = 0; i < numPrimary; i++) {
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Placing primary node (%s, %d) inside _primaryNodes\n", 
 								inet_ntoa(pri[i].publicIP), pri[i].port);
 			}
@@ -1966,7 +1970,7 @@ int GDPRouterNat::handleJoinSecondaryNak(int recvFD, routePacket* recvPacket) {
 	remove_select(recvFD, SELECT_READ);
 	close(recvFD);
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received JOIN_SECONDARY_NAK from node (%s, %d) \n", inet_ntoa(_proxy.publicIP), _proxy.port);
 	}
 	
@@ -2010,7 +2014,7 @@ int GDPRouterNat::handleJoinSecondaryNak(int recvFD, routePacket* recvPacket) {
 }
 
 int GDPRouterNat::handleNewSecondary(int recvFD, routePacket* recvPacket, string& message) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received NEW_SECONDARY from node (%s, %d) \n", inet_ntoa((recvPacket->src).publicIP), (recvPacket->src).port);
 	}
 	if (_myType == 'P') {
@@ -2021,7 +2025,7 @@ int GDPRouterNat::handleNewSecondary(int recvFD, routePacket* recvPacket, string
 		//Update routeTable
 		_routeTable[*newSecondary] = recvFD;
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP(inet_ntoa(newSecondary->publicIP));
 			string priIP(inet_ntoa(newSecondary->privateIP));
 			click_chatter("I am a Primary node and the NEW SECONDARY node is (%s, %s, %d)\n",
@@ -2053,7 +2057,7 @@ int GDPRouterNat::handleNewSecondary(int recvFD, routePacket* recvPacket, string
   					int sendFD = findFD->second;
 					int sentPacket = regulatedWrite(sendFD, message.c_str() , message.length());
 				
-					if (PRINT) {
+					if (_debug == 1) {
 						string pubIP(inet_ntoa((it->second)[i].publicIP));
 						string priIP(inet_ntoa((it->second)[i].privateIP));
 						click_chatter("Forwarding NEW SECONDARY to node (%s, %s, %d)\n",
@@ -2077,7 +2081,7 @@ int GDPRouterNat::handleNewSecondary(int recvFD, routePacket* recvPacket, string
 		char* newSecondaryOffset = (char *)(recvPacket) + sizeof(routePacket) + numSecondaryAdvertisments*32;
 		routeTableEntry* newSecondary = (routeTableEntry *)(newSecondaryOffset);
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP(inet_ntoa(newSecondary->publicIP));
 			string priIP(inet_ntoa(newSecondary->privateIP));
 			click_chatter("I am a Secondary node and the NEW SECONDARY node is (%s, %s, %d)\n",
@@ -2174,7 +2178,7 @@ int GDPRouterNat::handleNewSecondary(int recvFD, routePacket* recvPacket, string
 				_routeTable[*newSecondary] = clientFD;
 				_type[clientFD] = 'S';
 				
-				if (PRINT) {
+				if (_debug == 1) {
 					string pubIP(inet_ntoa(newSecondary->publicIP));
 					string priIP(inet_ntoa(newSecondary->privateIP));
 					click_chatter("Sent ADD_SECONDARY to node (%s, %s, %d)\n",
@@ -2188,7 +2192,7 @@ int GDPRouterNat::handleNewSecondary(int recvFD, routePacket* recvPacket, string
 }
 
 int GDPRouterNat::handleWithdrawSecondary(routePacket* recvPacket) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("I am a P node and I Received WITHDRAW_SECONDARY from node (%s, %d) \n", inet_ntoa((recvPacket->src).publicIP), (recvPacket->src).port);
 	}
 	
@@ -2196,7 +2200,7 @@ int GDPRouterNat::handleWithdrawSecondary(routePacket* recvPacket) {
 		char* failedSecondaryOffset = (char *)(recvPacket) + sizeof(routePacket);
 		routeTableEntry* failedSecondary = (routeTableEntry *)(failedSecondaryOffset);
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			string pubIP = inet_ntoa(failedSecondary->publicIP);
 			string priIP = inet_ntoa(failedSecondary->privateIP);
 			click_chatter("The failed secondary node is (%s, %s, %d) \n", pubIP.c_str(), priIP.c_str(),
@@ -2208,7 +2212,7 @@ int GDPRouterNat::handleWithdrawSecondary(routePacket* recvPacket) {
 		for (map<string, routeTableEntry>::iterator it = _secondaryAdvertisments.begin(); it != _secondaryAdvertisments.end(); it++) {
 			if (it->second == *failedSecondary) {
 				advertismentsToRemove.push_back(it->first);
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Client directly connected to failed secondary node: %s\n", (it->first).c_str());
 				}
 			}
@@ -2231,7 +2235,7 @@ int GDPRouterNat::handleAddSecondary(int recvFD, routePacket* recvPacket) {
 		
 	routeTableEntry newSecondary = recvPacket->src;
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		string pubIP(inet_ntoa(newSecondary.publicIP));
 		string priIP(inet_ntoa(newSecondary.privateIP));
 		click_chatter("Received ADD_SECONDARY from node (%s, %s, %d)\n",
@@ -2294,7 +2298,7 @@ int GDPRouterNat::handleAddSecondary(int recvFD, routePacket* recvPacket) {
 	_isFDReady[recvFD] = true;
 	int sentPacket = regulatedWrite(recvFD, sendPacket->data() , sendPacket->length());
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		string pubIP(inet_ntoa(newSecondary.publicIP));
 		string priIP(inet_ntoa(newSecondary.privateIP));
 		click_chatter("Sending ADD_SECONDARY_ACK to node (%s, %s, %d)\n", pubIP.c_str(),
@@ -2315,7 +2319,7 @@ int GDPRouterNat::handleAddAckSecondary(routePacket* recvPacket) {
 	routeTableEntry secondaryNode = recvPacket->src;
 	int numSecondaryAdvertisments = recvPacket->numClientAdvertisments;
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		string pubIP(inet_ntoa(secondaryNode.publicIP));
 		string priIP(inet_ntoa(secondaryNode.privateIP));
 		click_chatter("Received ADD_SECONDARY_ACK from node (%s, %s, %d)\n", pubIP.c_str(),
@@ -2339,7 +2343,7 @@ int GDPRouterNat::handleAddAckSecondary(routePacket* recvPacket) {
 
 int GDPRouterNat::handleClientAdvertisment(int recvFD, string& message, int dataLen, int optLen, string& packetSrc, int packetCmd) {
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received an Advertisment from a client: %s\n", packetSrc.c_str());
 	}
 	int numNewClients = 0;
@@ -2369,7 +2373,7 @@ int GDPRouterNat::handleClientAdvertisment(int recvFD, string& message, int data
 	string newAdvertisments = packetSrc.substr(0, 32);
 	newAdvertisments += packetData;
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("NUM OF CLIENTS: %d\n", numNewClients);
 		click_chatter("LENGTH: %d\n", newAdvertisments.length());
 	}
@@ -2418,7 +2422,7 @@ int GDPRouterNat::handleClientAdvertisment(int recvFD, string& message, int data
 				}
 				int sentPacket = regulatedWrite(sendFD, sendPacket->data(), sendPacket->length());
 			
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("I am a P node sending NEW_CLIENT_PRIMARY to node (%s, %d)\n", inet_ntoa(_primaryNodes[i].publicIP), 
 									_primaryNodes[i].port);
 				}
@@ -2474,7 +2478,7 @@ int GDPRouterNat::handleClientAdvertisment(int recvFD, string& message, int data
 				int sentPacket = regulatedWrite(sendFD, sendPacket->data(), sendPacket->length());
 				//write(sendFD, sendPacket->data(), sendPacket->length());
 				
-				if (PRINT) {
+				if (_debug == 1) {
 					string pubIP(inet_ntoa(node.publicIP));
 					string priIP(inet_ntoa(node.privateIP));
 					click_chatter("I am a S node sending NEW_CLIENT_SECONDARY to node (%s, %s, %d)\n", pubIP.c_str(), priIP.c_str(), 
@@ -2498,7 +2502,7 @@ int GDPRouterNat::handleClientAdvertisment(int recvFD, string& message, int data
 			int sentPacket = regulatedWrite(_proxyFD, sendPacket->data(), sendPacket->length());
 			//write(_proxyFD, sendPacket->data(), sendPacket->length());
 			
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Sending NEW_CLIENT_SECONDARY to proxy (%s, %d)\n", inet_ntoa(_proxy.publicIP), _proxy.port);
 			}
 			if (sentPacket < 0) {
@@ -2514,7 +2518,7 @@ int GDPRouterNat::handleClientAdvertisment(int recvFD, string& message, int data
 int GDPRouterNat::handleClientPrimary(routePacket* recvPacket) {
 	routeTableEntry advertismentSrc = recvPacket->src;
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received NEW/WITHDRAW_CLIENT_PRIMARY from (%s, %d)\n", inet_ntoa(advertismentSrc.publicIP), advertismentSrc.port);
 	}
 	
@@ -2541,7 +2545,7 @@ int GDPRouterNat::handleClientPrimary(routePacket* recvPacket) {
 int GDPRouterNat::handleClientSecondary(int recvFD, routePacket* recvPacket, string& message) {
 	routeTableEntry advertismentSrc = recvPacket->src;
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received NEW/WITHDRAW_CLIENT_SECONDARY from (%s, %d)\n", inet_ntoa(advertismentSrc.publicIP), advertismentSrc.port);
 	}
 	
@@ -2598,7 +2602,7 @@ int GDPRouterNat::handleClientSecondary(int recvFD, routePacket* recvPacket, str
 				}
 				int sentPacket = regulatedWrite(sendFD, message.c_str(), message.length());
 			
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Forwarding NEW/WITHDRAW_CLIENT_SECONDARY to (%s, %d)\n", inet_ntoa(_primaryNodes[i].publicIP), _primaryNodes[i].port);
 				}
 	
@@ -2632,7 +2636,7 @@ int GDPRouterNat::handleClientSecondary(int recvFD, routePacket* recvPacket, str
 }
 
 int GDPRouterNat::handleForwardPacket(int recvFD, string& packetDst, string& packetSrc, string& message , int dataLen, int optLen, int sigLen) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Received a forwarding packet: src: %s, dst: %s\n", packetSrc.c_str(), packetDst.c_str());
 	}
 	
@@ -2649,7 +2653,7 @@ int GDPRouterNat::handleForwardPacket(int recvFD, string& packetDst, string& pac
 			}
 			int sentPacket = regulatedWrite(sendFD, message.c_str(), optLen + dataLen + sigLen + 80);
 			
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Sent forward packet to: %d\n:", sendFD);
 			}
 			
@@ -2675,7 +2679,7 @@ int GDPRouterNat::handleForwardPacket(int recvFD, string& packetDst, string& pac
 				}
 				int sentPacket = regulatedWrite(sendFD, message.c_str(), optLen + dataLen + sigLen + 80);
 				
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Sent forward packet to node (%s, %d)\n:", inet_ntoa((it2->second).publicIP), (it2->second).port);
 				}
 			
@@ -2705,7 +2709,7 @@ int GDPRouterNat::handleForwardPacket(int recvFD, string& packetDst, string& pac
 				}
 				int sentPacket = regulatedWrite(sendFD, message.c_str(), optLen + dataLen + sigLen + 80);
 				
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Sent forward packet to node (%s, %s, %d)\n:", inet_ntoa((it4->second).publicIP), 
 									inet_ntoa((it4->second).privateIP), (it4->second).port);
 				}
@@ -2737,7 +2741,7 @@ int GDPRouterNat::handleForwardPacket(int recvFD, string& packetDst, string& pac
 			}
 			int sentPacket = regulatedWrite(sendFD, message.c_str(), optLen + dataLen + sigLen + 80);
 			
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Sent forward packet to: %d\n:", sendFD);
 			}
 			
@@ -2763,7 +2767,7 @@ int GDPRouterNat::handleForwardPacket(int recvFD, string& packetDst, string& pac
 				}
 				int sentPacket = regulatedWrite(sendFD, message.c_str(), optLen + dataLen + sigLen + 80);
 				
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("Sent forward packet to node (%s, %s, %d)\n:", inet_ntoa((it2->second).publicIP), 
 									inet_ntoa((it2->second).privateIP), (it2->second).port);
 				}
@@ -2788,7 +2792,7 @@ int GDPRouterNat::handleForwardPacket(int recvFD, string& packetDst, string& pac
 			}
 			int sentPacket = regulatedWrite(_proxyFD, message.c_str(), optLen + dataLen + sigLen + 80);
 			
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Sent forward packet to proxy (%s, %d)\n:", inet_ntoa(_proxy.publicIP), _proxy.port);
 			}
 				
@@ -2812,7 +2816,7 @@ int GDPRouterNat::handleForwardPacket(int recvFD, string& packetDst, string& pac
 }
 
 int GDPRouterNat::handleLostPacket(int recvFD, string& message, string& packetSrc, string& packetDst) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("A Lost Packet\n");
 	}
 	if (recvFD == 0) {
@@ -2840,7 +2844,7 @@ int GDPRouterNat::handleLostPacket(int recvFD, string& message, string& packetSr
 	}
 	int sentPacket = regulatedWrite(recvFD, nakMessage.c_str(), nakMessage.length());
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Sent lost packet back to src node\n");
 	}
 	
@@ -2904,7 +2908,7 @@ void GDPRouterNat::findProxyAndConnect(WritablePacket *sendPacket) {
 	//calculating the time taken to ping each node
 	vector<int> pingTimes = findPingTime();
 	
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Got all the ping timings\n");
 	}
 	// removing all nodes which couldn't be pinged succefully
@@ -3003,7 +3007,7 @@ void GDPRouterNat::findProxyAndConnect(WritablePacket *sendPacket) {
 			//Update Proxy FD;
 			_proxyFD = clientFD;
 			
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Chose Proxy Index %d/%d\n", _proxyIndex, _primaryNodes.size());
 				if (r->type == JOIN_SECONDARY) {
 					click_chatter("Sent JOIN_SECONDARY TO PROXY (%s, %d)", inet_ntoa(_proxy.publicIP), _proxy.port);
@@ -3072,7 +3076,7 @@ vector<int> GDPRouterNat::findPingTime() {
         //wait for a reply with a timeout
         rc = select(sock + 1, &read_set, NULL, NULL, &timeout);
         if (rc == 0) {
-        	if (PRINT) {
+        	if (_debug == 1) {
         		click_chatter("ICMP Timeout, Moving to next node\n");
         	}
         	pingTimes.push_back(3000);
@@ -3103,7 +3107,7 @@ vector<int> GDPRouterNat::findPingTime() {
 			}
 			recvTime.tv_sec -= sendTime.tv_sec;
 			int triptime = recvTime.tv_sec*1000+(recvTime.tv_usec/1000);
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("ICMP Reply, id=0x%x, sequence =  0x%x, TIME: %d ms\n",
 								icmp_hdr.un.echo.id, icmp_hdr.un.echo.sequence, triptime);
             }
@@ -3123,7 +3127,7 @@ vector<int> GDPRouterNat::findPingTime() {
 int GDPRouterNat::handleClientFailure(int clientFD) {
 	
 	// Update _clientAdvertisments
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Detected Client Failure\n");
 	}
 	
@@ -3132,7 +3136,7 @@ int GDPRouterNat::handleClientFailure(int clientFD) {
 	for (map<string, int>::iterator it = _clientAdvertisments.begin(); it != _clientAdvertisments.end(); it++) {
 		if (it->second == clientFD) {
 			advertismentsToRemove.push_back(it->first);
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("client with ID: %s, failed\n", (it->first).c_str());
 			}
 		}
@@ -3185,7 +3189,7 @@ int GDPRouterNat::handleClientFailure(int clientFD) {
 				}
 				int sentPacket = regulatedWrite(sendFD, sendPacket->data(), sendPacket->length());
 			
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("I am a P node sending WITHDRAW_CLIENT_PRIMARY to node (%s, %d)\n", inet_ntoa(_primaryNodes[i].publicIP), 
 									_primaryNodes[i].port);
 				}
@@ -3238,7 +3242,7 @@ int GDPRouterNat::handleClientFailure(int clientFD) {
 				int sentPacket = regulatedWrite(sendFD, sendPacket->data(), sendPacket->length());
 				//write(sendFD, sendPacket->data(), sendPacket->length());
 				
-				if (PRINT) {
+				if (_debug == 1) {
 					string pubIP(inet_ntoa(node.publicIP));
 					string priIP(inet_ntoa(node.privateIP));
 					click_chatter("I am a S node sending WITHDRAW_CLIENT_SECONDARY to node (%s, %s, %d)\n", pubIP.c_str(), priIP.c_str(), 
@@ -3262,7 +3266,7 @@ int GDPRouterNat::handleClientFailure(int clientFD) {
 			int sentPacket = regulatedWrite(_proxyFD, sendPacket->data(), sendPacket->length());
 			//write(_proxyFD, sendPacket->data(), sendPacket->length());
 			
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Sending WITHDRAW_CLIENT_SECONDARY to proxy (%s, %d)\n", inet_ntoa(_proxy.publicIP), _proxy.port);
 			}
 			if (sentPacket < 0) {
@@ -3287,7 +3291,7 @@ int GDPRouterNat::handleClientFailure(int clientFD) {
 
 int GDPRouterNat::handleSecondaryFailure(int secFD) {
 	// identify the S node that failed given the connection handler
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Detected a Secondary Node failure\n");
 	}
 	bool foundFailedNode = false;
@@ -3300,7 +3304,7 @@ int GDPRouterNat::handleSecondaryFailure(int secFD) {
 	} 
 	
 	if (foundFailedNode == true) {
-		if (PRINT) {
+		if (_debug == 1) {
 				string pubIP(inet_ntoa(failedNode.publicIP));
 				string priIP(inet_ntoa(failedNode.privateIP));
 				click_chatter("I detected (%s, %s, %d) S node failed\n", pubIP.c_str(), priIP.c_str(), 
@@ -3315,7 +3319,7 @@ int GDPRouterNat::handleSecondaryFailure(int secFD) {
 		for (map<string, routeTableEntry>::iterator it = _secondaryAdvertisments.begin(); it != _secondaryAdvertisments.end(); it++) {
 			if (it->second == failedNode) {
 				advertismentsToRemove.push_back(it->first);
-				if (PRINT) {
+				if (_debug == 1) {
 					click_chatter("The client directly connected to the secondary node: %s\n", (it->first).c_str());
 				}
 			}
@@ -3361,7 +3365,7 @@ int GDPRouterNat::handleSecondaryFailure(int secFD) {
 					
 					int newSize = (findSGroup->second).size();
 					if (newSize == 0) {
-						if (PRINT) {
+						if (_debug == 1) {
 							click_chatter("The failed S node was the only node I had in the S group\n");
 						}
 						_publicToPrivate.erase(findSGroup);
@@ -3407,7 +3411,7 @@ int GDPRouterNat::handleSecondaryFailure(int secFD) {
 					int sendFD = findFD->second;
 					int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
 			
-					if (PRINT) {
+					if (_debug == 1) {
 						click_chatter("Sending WITHDRAW_SECONDARY to primary node (%s, %d) \n", inet_ntoa(_primaryNodes[i].publicIP),
 										_primaryNodes[i].port);
 					}
@@ -3440,7 +3444,7 @@ int GDPRouterNat::handleSecondaryFailure(int secFD) {
 }
 
 int GDPRouterNat::handlePrimaryFailure(int priFD) {
-	if (PRINT) {
+	if (_debug == 1) {
 		click_chatter("Detected Primary Node Failure\n");
 	}
 	if (_myType == 'P') {
@@ -3476,7 +3480,7 @@ int GDPRouterNat::handlePrimaryFailure(int priFD) {
 		if (foundFailedNode == true) {
 			// Update _primaryNodes, remove the failed P node;
 			// find the index of the failed P nodes inside _primaryNodes
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("The failed P node is (%s, %d)\n", inet_ntoa(failedNode.publicIP), failedNode.port);
 			}
 			
@@ -3502,7 +3506,7 @@ int GDPRouterNat::handlePrimaryFailure(int priFD) {
 			for (map<string, routeTableEntry>::iterator it = _primaryAdvertisments.begin(); it != _primaryAdvertisments.end(); it++) {
 				if (it->second == failedNode) {
 					advertismentsToRemove.push_back(it->first);
-					if (PRINT) {
+					if (_debug == 1) {
 						click_chatter("Client directly connected to failed P node: %s\n", (it->first).c_str());
 					}
 				}
@@ -3553,7 +3557,7 @@ int GDPRouterNat::handlePrimaryFailure(int priFD) {
 						if (findFD != _routeTable.end()) {
 							int sendFD = findFD->second;
 							int sentPacket = regulatedWrite(sendFD, sendPacket->data() , sendPacket->length());
-							if (PRINT) {
+							if (_debug == 1) {
 								string pubIP(inet_ntoa(s.publicIP));
 								string priIP(inet_ntoa(s.privateIP));
 								click_chatter("Sending WITHDRAW_PRIMARY to node (%s, %s, %d), %d\n", pubIP.c_str(), priIP.c_str(), s.port, _routeTable[s]);
@@ -3582,7 +3586,7 @@ int GDPRouterNat::handlePrimaryFailure(int priFD) {
 		// 2. find a new proxy
 		// 3. send UPDATE_SECONDARY command to new proxy
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			click_chatter("My Proxy (%s, %d) has failed\n", inet_ntoa(_proxy.publicIP), _proxy.port);
 		}
 		
@@ -3640,7 +3644,7 @@ int GDPRouterNat::handlePrimaryFailure(int priFD) {
 		// chose a proxy 
 		findProxyAndConnect(sendPacket);
 		
-		if (PRINT) {
+		if (_debug == 1) {
 			click_chatter(" New Chosen Proxy is (%s, %d)\n", inet_ntoa(_primaryNodes[_proxyIndex].publicIP), _primaryNodes[_proxyIndex].port);
 		}
 		
@@ -3825,7 +3829,7 @@ int GDPRouterNat::processPacket(int fd, string& message, int dataLen, int optLen
 			}
 			status = handleClientSecondary(fd, recvPacket, message);
 		} else if (recvPacket->type == PING) {
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Recived a ping packet\n");
 			}
 			if (LOG) {
@@ -3840,7 +3844,7 @@ int GDPRouterNat::processPacket(int fd, string& message, int dataLen, int optLen
 				}
 			}*/
 		} else if (recvPacket->type == COOL) {
-			if (PRINT) {
+			if (_debug == 1) {
 				click_chatter("Recived a cool packet\n");
 			}
 		} else {

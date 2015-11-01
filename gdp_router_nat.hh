@@ -27,7 +27,6 @@ using namespace std;
 
 #define GDP_HEADER_SIZE 80
 
-#define PRINT 1
 #define LOG 1
 #define LOG_DISPLAY_FREQUENCY 10
 #define LOG_SAMPLE_RATE 60
@@ -290,6 +289,9 @@ class GDPRouterNat : public Element {
 		uint16_t _webPort; 
 		struct sockaddr_in _webServer;
 		int _webFD;
+		
+		//option to print debug output
+		int _debug;
 };
 
 CLICK_ENDDECLS

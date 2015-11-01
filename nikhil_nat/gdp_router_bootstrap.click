@@ -8,7 +8,8 @@
 //           for the first node, SPORT = BOOTPORT
 //CANBEPROXY - boolean option wether the router can serve as proxy or not (true or false)
 //WPORT - port of the http server running inside router to display statistics in visualization tool
+//DEBUG - option to print router's debug output on terminal (1 or 0)
  
-define($SADDR 128.32.33.68, $SPORT 5655, $BOOTADDR 128.32.33.68, $BOOTPORT 5655, $CANBEPROXY true, $WPORT 15000)
+define($SADDR 128.32.33.68, $SPORT 5655, $BOOTADDR 128.32.33.68, $BOOTPORT 5655, $CANBEPROXY true, $WPORT 15000, $DEBUG 1)
 
-gdp :: GDPRouterNat($SADDR, $SPORT, $BOOTADDR, $BOOTPORT, $CANBEPROXY, $WPORT)
+gdp :: GDPRouterNat($SADDR, $SPORT, $BOOTADDR, $BOOTPORT, $CANBEPROXY, $WPORT, $DEBUG)
